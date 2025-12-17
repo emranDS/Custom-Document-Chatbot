@@ -10,6 +10,7 @@ class DocumentProcessor:
         self.chunk_overlap = chunk_overlap
     
     def read_pdf(self, file_path: str) -> str:
+        """Extract text from PDF file"""
         text = ""
         try:
             with open(file_path, 'rb') as file:
@@ -24,6 +25,7 @@ class DocumentProcessor:
             raise Exception(f"Failed to read PDF: {str(e)}")
     
     def read_docx(self, file_path: str) -> str:
+        """Extract text from DOCX file"""
         text = ""
         try:
             doc = DocxDocument(file_path)
@@ -35,6 +37,7 @@ class DocumentProcessor:
             raise Exception(f"Failed to read DOCX: {str(e)}")
     
     def read_txt(self, file_path: str) -> str:
+        """Extract text from TXT/MD file"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 return file.read()
@@ -43,20 +46,24 @@ class DocumentProcessor:
                 with open(file_path, 'r', encoding='latin-1') as file:
                     return file.read()
             except:
-                raise Exception("Failed to read text file")
+                raise Exception("Failed to read text file with multiple encodings")
         except Exception as e:
             raise Exception(f"Failed to read text file: {str(e)}")
     
     def chunk_text(self, text: str) -> List[str]:
+        """Split text into overlapping chunks"""
         if not text:
             return []
         
+        # Clean text
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = re.sub(r'[ \t]+', ' ', text)
         
         words = text.split()
-        chunks = []
+        if len(words) <= self.chunk_size:
+            return [' '.join(words)]
         
+        chunks = []
         for i in range(0, len(words), self.chunk_size - self.chunk_overlap):
             chunk = ' '.join(words[i:i + self.chunk_size])
             chunks.append(chunk)
@@ -67,13 +74,12 @@ class DocumentProcessor:
         return chunks
     
     def process_document(self, file_path: str) -> List[str]:
+        """Main method to process any document"""
         if not os.path.exists(file_path):
             raise Exception(f"File not found: {file_path}")
         
         _, ext = os.path.splitext(file_path)
         ext = ext.lower()
-        
-        print(f"Processing {file_path} ({ext})")
         
         if ext == '.pdf':
             text = self.read_pdf(file_path)
@@ -84,10 +90,12 @@ class DocumentProcessor:
         else:
             raise Exception(f"Unsupported file type: {ext}")
         
-        if not text:
-            raise Exception("No text could be extracted from the document")
+        if not text or len(text.strip()) < 10:
+            raise Exception("No readable text could be extracted from the document")
         
         chunks = self.chunk_text(text)
         
-        print(f"Created {len(chunks)} chunks from document")
+        if not chunks:
+            raise Exception("Failed to create text chunks from document")
+        
         return chunks

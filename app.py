@@ -96,7 +96,7 @@ st.markdown("""
         background: #2196f3;
         color: white;
     }
-    .badge-openrouter {
+    .badge-ai {
         background: #4caf50;
         color: white;
     }
@@ -104,10 +104,20 @@ st.markdown("""
         background: #ff9800;
         color: white;
     }
+    /* Custom container styling */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        max-height: 500px;
+        overflow-y: auto;
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 def initialize_session_state():
+    """Initialize all session state variables"""
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
@@ -129,12 +139,13 @@ def initialize_session_state():
     if "uploaded_file_size" not in st.session_state:
         st.session_state.uploaded_file_size = None
     
-    if "openrouter_configured" not in st.session_state:
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if api_key:
-            st.session_state.openrouter_configured = True
-        else:
-            st.session_state.openrouter_configured = False
+    # Check for API key in Streamlit secrets or environment
+    if "OPENROUTER_API_KEY" in st.secrets:
+        st.session_state.api_key = st.secrets["OPENROUTER_API_KEY"]
+        st.session_state.api_configured = True
+    else:
+        st.session_state.api_key = os.getenv("OPENROUTER_API_KEY")
+        st.session_state.api_configured = bool(st.session_state.api_key)
     
     if "answering_mode" not in st.session_state:
         st.session_state.answering_mode = "Smart (Document + AI)"
@@ -150,18 +161,19 @@ def initialize_session_state():
 initialize_session_state()
 
 def call_openrouter_api(messages: List[Dict], temperature: float = 0.3) -> str:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    """Call OpenRouter API to get AI response"""
+    api_key = st.session_state.api_key
     model = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
     
     if not api_key:
-        return "Error: API key not configured. Please check your .env file."
+        return "Error: OpenRouter API key not configured. Please add it to Streamlit Secrets or .env file."
     
     try:
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8501",
-            "X-Title": "Document Chatbot"
+            "HTTP-Referer": "https://custom-document-chatbot.streamlit.app",
+            "X-Title": "Custom Document Chatbot"
         }
         
         data = {
@@ -186,7 +198,9 @@ def call_openrouter_api(messages: List[Dict], temperature: float = 0.3) -> str:
             if response.status_code == 429:
                 error_msg = "Rate limit exceeded. Please wait a moment and try again."
             elif response.status_code == 401:
-                error_msg = "Invalid API key. Please check your .env file."
+                error_msg = "Invalid API key. Please check your API key in Streamlit Secrets."
+            elif response.status_code == 404:
+                error_msg = "Model not found. Please check your OpenRouter privacy settings to allow free model training."
             return f"Error: {error_msg}"
             
     except requests.exceptions.Timeout:
@@ -194,9 +208,10 @@ def call_openrouter_api(messages: List[Dict], temperature: float = 0.3) -> str:
     except requests.exceptions.ConnectionError:
         return "Error: Connection failed. Please check your internet connection."
     except Exception as e:
-        return f"Error calling API: {str(e)}"
+        return f"Error calling OpenRouter API: {str(e)}"
 
 def get_smart_answer(query: str, context: Optional[str] = None) -> Dict:
+    """Get smart answer using document context and AI knowledge"""
     messages = []
     
     if context:
@@ -246,17 +261,17 @@ Please provide the best possible answer following the instructions above."""
             source = "document"
             st.session_state.stats["document_answers"] += 1
         elif "Based on general knowledge" in answer:
-            source = "openrouter"
+            source = "ai"
             st.session_state.stats["ai_answers"] += 1
         elif "Mixed sources" in answer:
             source = "mixed"
             st.session_state.stats["document_answers"] += 0.5
             st.session_state.stats["ai_answers"] += 0.5
         else:
-            source = "openrouter"
+            source = "ai"
             st.session_state.stats["ai_answers"] += 1
     else:
-        source = "openrouter"
+        source = "ai"
         st.session_state.stats["ai_answers"] += 1
     
     return {
@@ -266,6 +281,7 @@ Please provide the best possible answer following the instructions above."""
     }
 
 def process_uploaded_document(uploaded_file) -> bool:
+    """Process uploaded document and add to vector store"""
     try:
         suffix = os.path.splitext(uploaded_file.name)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
@@ -310,61 +326,63 @@ def process_uploaded_document(uploaded_file) -> bool:
         return False
 
 def render_sidebar():
+    """Render the sidebar with controls and info"""
     with st.sidebar:
-        st.markdown("## Settings")
+        st.markdown("## ⚙️ Settings")
         st.markdown("---")
         
-        st.markdown("### Upload Document")
+        st.markdown("### 📁 Upload Document")
         uploaded_file = st.file_uploader(
             "Choose a file",
             type=["pdf", "docx", "txt", "md"],
-            help="Supported: PDF, Word, Text, Markdown",
+            help="Supported formats: PDF, Word, Text, Markdown",
             label_visibility="collapsed"
         )
         
         if uploaded_file:
             file_size = len(uploaded_file.getvalue()) / 1024
-            st.info(f"File: {uploaded_file.name}\nSize: {file_size:.1f} KB")
+            st.info(f"**File:** {uploaded_file.name}\n**Size:** {file_size:.1f} KB")
         
         col1, col2 = st.columns(2)
         with col1:
             if uploaded_file and not st.session_state.processing:
-                if st.button("Process", type="primary", use_container_width=True):
+                if st.button("🚀 Process", type="primary", use_container_width=True):
                     st.session_state.processing = True
                     with st.spinner(f"Processing {uploaded_file.name}..."):
                         success = process_uploaded_document(uploaded_file)
                         if success:
-                            st.success("Processed successfully!")
+                            st.success("✅ Processed successfully!")
+                            st.balloons()
                     st.session_state.processing = False
                     st.rerun()
         
         with col2:
             if st.session_state.document_processed:
-                if st.button("Clear", type="secondary", use_container_width=True):
+                if st.button("🗑️ Clear", type="secondary", use_container_width=True):
                     st.session_state.vector_store.clear()
                     st.session_state.document_processed = False
                     st.session_state.uploaded_file_name = None
                     st.session_state.messages = []
                     st.session_state.conversation_history = []
                     st.session_state.stats["total_chunks"] = 0
-                    st.success("Document cleared!")
+                    st.success("✅ Document cleared!")
                     st.rerun()
         
         st.markdown("---")
-        st.markdown("### Document Status")
+        st.markdown("### 📊 Document Status")
         
         if st.session_state.document_processed:
             info = st.session_state.vector_store.get_info()
             
-            with st.expander(f"{st.session_state.uploaded_file_name}", expanded=False):
-                st.write(f"Chunks: {info['total_documents']:,}")
-                st.write(f"Total Words: {info['total_words']:,}")
-                st.write(f"Embeddings: {info['embedding_type']}")
+            with st.expander(f"📄 {st.session_state.uploaded_file_name}", expanded=False):
+                st.write(f"**Chunks:** {info['total_documents']:,}")
+                st.write(f"**Total Words:** {info['total_words']:,}")
+                st.write(f"**Embeddings:** {info['embedding_type']}")
         else:
-            st.info("No document uploaded yet")
+            st.info("📭 No document uploaded yet")
         
         st.markdown("---")
-        st.markdown("### Answering Mode")
+        st.markdown("### 🎯 Answering Mode")
         
         mode = st.radio(
             "Select answering strategy:",
@@ -376,17 +394,18 @@ def render_sidebar():
         st.session_state.answering_mode = mode
         
         st.markdown("---")
-        st.markdown("### API Status")
+        st.markdown("### 🔑 API Status")
         
-        if st.session_state.openrouter_configured:
-            st.success("AI API Connected")
-            st.info("Ready to answer questions")
+        if st.session_state.api_configured:
+            model = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
+            st.success("✅ API Connected")
+            st.info(f"**Model:** {model}")
         else:
-            st.error("API Key Missing")
-            st.info("Add API key to .env file")
+            st.error("❌ API Key Missing")
+            st.info("Add `OPENROUTER_API_KEY` to Streamlit Secrets or `.env` file")
         
         st.markdown("---")
-        st.markdown("### Statistics")
+        st.markdown("### 📈 Statistics")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -396,24 +415,31 @@ def render_sidebar():
                 st.metric("Chunks", st.session_state.stats["total_chunks"])
 
 def render_chat_interface():
-    st.markdown("# Custom Document Chatbot")
+    """Render the main chat interface"""
+    st.markdown("# 🤖 Custom Document Chatbot")
     
     mode = st.session_state.answering_mode
     if mode == "Smart (Document + AI)":
-        st.success("Smart Mode Active: Using document + AI knowledge")
+        st.success("🔍 **Smart Mode Active:** Using document + AI knowledge")
     elif mode == "Document Only":
-        st.warning("Document Only: Answers strictly from uploaded document")
+        st.warning("📄 **Document Only:** Answers strictly from uploaded document")
     else:
-        st.info("AI Only: General AI responses")
+        st.info("🤖 **AI Only:** General AI responses")
     
     if st.session_state.document_processed:
-        st.info(f"Active Document: {st.session_state.uploaded_file_name}")
+        st.info(f"""
+        📄 **Active Document:** `{st.session_state.uploaded_file_name}`
+        💾 **Size:** {st.session_state.uploaded_file_size}
+        🏷️ **Mode:** {st.session_state.answering_mode}
+        """)
     else:
-        st.warning("Upload a document to enable document-based answers")
+        st.warning("👈 **Upload a document** to enable document-based answers")
     
-    chat_container = st.container(height=500, border=True)
+    # Create chat container with fixed height (using CSS instead of height parameter)
+    chat_container = st.container(border=True)
     
     with chat_container:
+        # Display chat history
         for i, msg in enumerate(st.session_state.messages):
             if msg["role"] == "user":
                 message(msg["content"], is_user=True, key=f"user_{i}")
@@ -421,13 +447,13 @@ def render_chat_interface():
                 if "source" in msg:
                     source = msg["source"]
                     if source == "document":
-                        st.markdown(f'<div class="source-badge badge-document">From Document</div>', 
+                        st.markdown(f'<div class="source-badge badge-document">📄 From Document</div>', 
                                    unsafe_allow_html=True)
-                    elif source == "openrouter":
-                        st.markdown(f'<div class="source-badge badge-openrouter">AI Knowledge</div>', 
+                    elif source == "ai":
+                        st.markdown(f'<div class="source-badge badge-ai">🤖 AI Knowledge</div>', 
                                    unsafe_allow_html=True)
                     elif source == "mixed":
-                        st.markdown(f'<div class="source-badge badge-mixed">Mixed Sources</div>', 
+                        st.markdown(f'<div class="source-badge badge-mixed">📄🤖 Mixed Sources</div>', 
                                    unsafe_allow_html=True)
                 
                 message(msg["content"], is_user=False, key=f"assistant_{i}")
@@ -442,11 +468,11 @@ def render_chat_interface():
         mode = st.session_state.answering_mode
         
         if mode == "AI Only" or not st.session_state.document_processed:
-            with st.spinner("Thinking..."):
+            with st.spinner("🤖 Thinking..."):
                 response = get_smart_answer(query, context=None)
         
         elif mode == "Document Only":
-            with st.spinner("Searching document..."):
+            with st.spinner("🔍 Searching document..."):
                 search_results = st.session_state.vector_store.search(query, k=3)
                 
                 if search_results:
@@ -455,13 +481,13 @@ def render_chat_interface():
                     response = get_smart_answer(query, context=context)
                 else:
                     response = {
-                        "answer": "No relevant information found in your document.\n\nPlease ask something related to the document content, or switch to Smart/AI mode for general answers.",
+                        "answer": "📭 **No relevant information found in your document.**\n\nPlease ask something related to the document content, or switch to Smart/AI mode for general answers.",
                         "source": "document",
                         "context_used": True
                     }
         
         else:
-            with st.spinner("Searching document..."):
+            with st.spinner("🔍 Searching document..."):
                 search_results = st.session_state.vector_store.search(query, k=3)
                 
                 if search_results:
@@ -471,31 +497,31 @@ def render_chat_interface():
                         context = "\n\n".join([f"[Chunk {r['rank']}] {r['content']}" 
                                              for r in search_results])
                         
-                        with st.spinner("Combining document & AI knowledge..."):
+                        with st.spinner("📄🤖 Combining document & AI knowledge..."):
                             response = get_smart_answer(query, context=context)
                         
                         if best_score < 0.4:
-                            response["answer"] = f"Note: This topic has weak relevance to your document (similarity: {best_score:.1%})\n\n" + response["answer"]
+                            response["answer"] = f"📝 **Note:** This topic has weak relevance to your document (similarity: {best_score:.1%})\n\n" + response["answer"]
                     
                     else:
                         context = "\n\n".join([f"[Chunk {r['rank']}] {r['content']}" 
                                              for r in search_results[:1]])
                         
-                        with st.spinner("Getting AI answer with weak document context..."):
+                        with st.spinner("🤖 Getting AI answer with weak document context..."):
                             response = get_smart_answer(query, context=context)
                         
-                        response["answer"] = f"Note: Weak document relevance ({best_score:.1%} similarity)\n\n" + response["answer"]
+                        response["answer"] = f"📝 **Note:** Weak document relevance ({best_score:.1%} similarity)\n\n" + response["answer"]
                 
                 else:
-                    with st.spinner("Getting general AI answer..."):
+                    with st.spinner("🤖 Getting general AI answer..."):
                         response = get_smart_answer(query, context=None)
                     
-                    response["answer"] = "Note: No relevant content found in your document. Here's a general answer:\n\n" + response["answer"]
+                    response["answer"] = "📭 **Note:** No relevant content found in your document. Here's a general answer:\n\n" + response["answer"]
         
         st.session_state.messages.append({
             "role": "assistant", 
             "content": response["answer"],
-            "source": response.get("source", "openrouter")
+            "source": response.get("source", "ai")
         })
         
         st.session_state.conversation_history.append({"role": "user", "content": query})
@@ -523,19 +549,7 @@ def render_chat_interface():
         st.metric("Document/AI Answers", f"{doc_answers}/{ai_answers}")
 
 def main():
-    if not os.getenv("OPENROUTER_API_KEY"):
-        st.error("""
-        API Key Required
-        
-        Please create a .env file in your project folder with:
-        OPENROUTER_API_KEY=your_key_here
-        
-        Get your free API key from: https://openrouter.ai/
-        
-        Then restart the application.
-        """)
-        st.stop()
-    
+    """Main application function"""
     render_sidebar()
     render_chat_interface()
 

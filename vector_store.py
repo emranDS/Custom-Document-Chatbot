@@ -16,6 +16,7 @@ class VectorStore:
         self.load()
     
     def create_single_embedding(self, text: str) -> List[float]:
+        """Create simple hash-based embedding for a text"""
         hash_obj = hashlib.sha256(text.encode('utf-8'))
         hex_hash = hash_obj.hexdigest()
         
@@ -33,14 +34,13 @@ class VectorStore:
         return vector
     
     def create_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Create embeddings for multiple texts"""
         return [self.create_single_embedding(text) for text in texts]
     
     def add_documents(self, documents: List[str], metadata: Optional[List[Dict]] = None):
+        """Add documents to the vector store"""
         if not documents:
-            print("No documents to add")
             return
-        
-        print(f"Adding {len(documents)} documents to vector store...")
         
         try:
             embeddings = self.create_embeddings(documents)
@@ -61,13 +61,12 @@ class VectorStore:
             
             self.save()
             
-            print(f"Successfully added {len(documents)} documents")
-            
         except Exception as e:
             print(f"Error adding documents: {e}")
             raise
     
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
         vec1_array = np.array(vec1)
         vec2_array = np.array(vec2)
         
@@ -82,11 +81,9 @@ class VectorStore:
         return max(0.0, min(1.0, similarity))
     
     def search(self, query: str, k: int = 4, min_score: float = 0.1) -> List[Dict]:
+        """Search for similar documents"""
         if not self.documents:
-            print("No documents in vector store")
             return []
-        
-        print(f"Searching for: '{query[:50]}...'")
         
         try:
             query_embeddings = self.create_embeddings([query])
@@ -115,7 +112,6 @@ class VectorStore:
                 }
                 results.append(result)
             
-            print(f"Found {len(results)} relevant results")
             return results
             
         except Exception as e:
@@ -123,6 +119,7 @@ class VectorStore:
             return []
     
     def save(self):
+        """Save vector store data to disk"""
         try:
             data = {
                 'documents': self.documents,
@@ -137,12 +134,11 @@ class VectorStore:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, default=str)
             
-            print(f"Saved {len(self.documents)} documents to disk")
-            
         except Exception as e:
             print(f"Error saving to disk: {e}")
     
     def load(self):
+        """Load vector store data from disk"""
         filepath = os.path.join(self.persist_directory, 'vector_store.json')
         
         if os.path.exists(filepath):
@@ -154,17 +150,14 @@ class VectorStore:
                 self.embeddings = data.get('embeddings', [])
                 self.metadata = data.get('metadata', [])
                 
-                print(f"Loaded {len(self.documents)} documents from disk")
-                
             except Exception as e:
                 print(f"Error loading from disk: {e}")
                 self.documents = []
                 self.embeddings = []
                 self.metadata = []
-        else:
-            print("No saved vector store found, starting fresh")
     
     def clear(self):
+        """Clear all documents from the vector store"""
         self.documents = []
         self.embeddings = []
         self.metadata = []
@@ -172,10 +165,9 @@ class VectorStore:
         filepath = os.path.join(self.persist_directory, 'vector_store.json')
         if os.path.exists(filepath):
             os.remove(filepath)
-        
-        print("Vector store cleared")
     
     def get_info(self) -> Dict:
+        """Get information about the vector store"""
         total_chars = sum(len(doc) for doc in self.documents)
         total_words = sum(len(doc.split()) for doc in self.documents)
         
